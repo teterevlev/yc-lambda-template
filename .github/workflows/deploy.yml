@@ -33,6 +33,13 @@ jobs:
           
           echo "✓ Package prepared"
       
+      - name: Create deployment archive
+        run: |
+          cd package
+          zip -r ../function.zip . > /dev/null
+          cd ..
+          echo "✓ Archive created"
+      
       - name: Deploy to Yandex Cloud Functions
         uses: yc-actions/yc-sls-function@v4
         with:
@@ -46,5 +53,4 @@ jobs:
           execution-timeout: '3s'
           environment: |
             PYTHONUNBUFFERED=1
-          include: |
-            package/**/*
+          source-path: function.zip
