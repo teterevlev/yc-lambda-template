@@ -19,14 +19,11 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Create deployment package
+      - name: Prepare deployment directory
         run: |
           mkdir -p package
           cp -r *.py lib/ 2>/dev/null || true
           cp requirements.txt package/ 2>/dev/null || true
-          cd package
-          zip -r ../function.zip . > /dev/null
-          cd ..
       
       - name: Deploy to Yandex Cloud Functions
         uses: goodsmileduck/yandex-serverless-action@v2
@@ -37,5 +34,5 @@ jobs:
           memory: '128'
           entrypoint: 'index.handler'
           execution_timeout: '3s'
-          source: 'function.zip'
+          source: 'package'
           environment: 'PYTHONUNBUFFERED=1'
