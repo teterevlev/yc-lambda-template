@@ -1,0 +1,14 @@
+name: Yandex Cloud Functions Python Template
+
+description: Шаблон для создания Lambda-функций на Python для Yandex Cloud с автоматическим деплоем через GitHub Actions
+
+variables:
+  - name: function_name
+    description: Название функции в Yandex Cloud
+    default: my-function
+    required: true
+
+  - name: runtime
+    description: Версия Python runtime
+    default: python311
+    required: false
