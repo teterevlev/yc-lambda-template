@@ -19,10 +19,6 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Install dependencies
-        run: |
-          pip install --quiet requests pyjwt cryptography
-      
       - name: Create deployment package
         run: |
           mkdir -p package
@@ -32,118 +28,14 @@ jobs:
           zip -r ../function.zip . > /dev/null
           cd ..
       
-      - name: Get IAM token and deploy function
-        env:
-          YC_SERVICE_ACCOUNT_KEY: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
-          YC_FUNCTION_ID: ${{ secrets.YC_FUNCTION_ID }}
-        run: |
-          python3 << 'PYTHON_SCRIPT'
-          import json
-          import requests
-          import time
-          import jwt
-          from datetime import datetime, timedelta
-          import os
-          import sys
-          
-          sa_key_json = os.getenv('YC_SERVICE_ACCOUNT_KEY', '').strip()
-          if not sa_key_json:
-              print("Error: YC_SERVICE_ACCOUNT_KEY is empty", file=sys.stderr)
-              sys.exit(1)
-          
-          try:
-              sa_key = json.loads(sa_key_json)
-          except json.JSONDecodeError as e:
-              print(f"Error parsing JSON: {e}", file=sys.stderr)
-              sys.exit(1)
-          
-          function_id = os.getenv('YC_FUNCTION_ID', '').strip()
-          if not function_id:
-              print("Error: YC_FUNCTION_ID is empty", file=sys.stderr)
-              sys.exit(1)
-          
-          # Create JWT
-          now = datetime.utcnow()
-          payload = {
-              'aud': 'https://iam.api.cloud.yandex.net/iam/v1/tokens',
-              'iss': sa_key['service_account_id'],
-              'iat': int(time.mktime(now.timetuple())),
-              'exp': int(time.mktime((now + timedelta(hours=1)).timetuple()))
-          }
-          
-          encoded_token = jwt.encode(
-              payload,
-              sa_key['private_key'],
-              algorithm='PS256',
-              headers={'kid': sa_key['id']}
-          )
-          
-          # Get IAM token
-          iam_response = requests.post(
-              'https://iam.api.cloud.yandex.net/iam/v1/tokens',
-              json={'jwt': encoded_token},
-              timeout=30
-          )
-          iam_response.raise_for_status()
-          iam_token = iam_response.json()['iamToken']
-          
-          # Read function.zip
-          with open('function.zip', 'rb') as f:
-              zip_content = f.read()
-          
-          # Try different API endpoints
-          endpoints = [
-              f'https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/{function_id}/versions',
-              f'https://functions.api.cloud.yandex.net/functions/v1/functions/{function_id}/versions',
-              f'https://serverless-functions.api.cloud.yandex.net/functions/{function_id}/versions',
-          ]
-          
-          files = {
-              'package': ('function.zip', zip_content, 'application/zip')
-          }
-          
-          data = {
-              'runtime': 'python311',
-              'entrypoint': 'index.handler',
-              'resources.memory': '134217728',
-              'executionTimeout': '3s',
-              'environment': 'PYTHONUNBUFFERED=1'
-          }
-          
-          create_response = None
-          last_error = None
-          
-          for endpoint in endpoints:
-              try:
-                  print(f"Trying endpoint: {endpoint}")
-                  create_response = requests.post(
-                      endpoint,
-                      headers={
-                          'Authorization': f'Bearer {iam_token}'
-                      },
-                      files=files,
-                      data=data,
-                      timeout=300
-                  )
-                  if create_response.status_code in [200, 201]:
-                      break
-                  elif create_response.status_code != 404:
-                      # Not 404, so endpoint exists but has other error
-                      last_error = f"HTTP {create_response.status_code}: {create_response.text}"
-                      break
-              except Exception as e:
-                  last_error = str(e)
-                  continue
-          
-          if not create_response:
-              print(f"✗ All endpoints failed. Last error: {last_error}", file=sys.stderr)
-              sys.exit(1)
-          
-          if create_response.status_code not in [200, 201]:
-              print(f"✗ Error: HTTP {create_response.status_code}", file=sys.stderr)
-              print(f"Response: {create_response.text}", file=sys.stderr)
-              sys.exit(1)
-          
-          version = create_response.json()
-          print(f"✓ Function version created: {version.get('id', 'unknown')}")
-          PYTHON_SCRIPT
+      - name: Deploy to Yandex Cloud Functions
+        uses: goodsmileduck/yandex-serverless-action@v2
+        with:
+          token: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          function_id: ${{ secrets.YC_FUNCTION_ID }}
+          runtime: 'python311'
+          memory: '128'
+          entrypoint: 'index.handler'
+          timeout: '3s'
+          source: 'function.zip'
+          environment: 'PYTHONUNBUFFERED=1'
