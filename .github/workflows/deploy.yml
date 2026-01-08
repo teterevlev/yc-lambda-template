@@ -24,48 +24,90 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Install YC CLI
+      - name: Install dependencies
         run: |
-          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
-          echo "$HOME/.yandex-cloud/bin" >> $GITHUB_PATH
-          echo "$HOME/.yandex-cloud/bin" >> $PATH
-      
-      - name: Verify YC CLI installation
-        run: |
-          export PATH="$HOME/.yandex-cloud/bin:$PATH"
-          yc --version
-      
-      - name: Configure YC CLI
-        run: |
-          export PATH="$HOME/.yandex-cloud/bin:$PATH"
-          mkdir -p ~/.config/yandex-cloud
-          echo "$YC_SERVICE_ACCOUNT_KEY" > ~/.config/yandex-cloud/key.json
-          yc config set service-account-key ~/.config/yandex-cloud/key.json
+          pip install --quiet requests pyjwt cryptography
       
       - name: Create deployment package
         run: |
           mkdir -p package
           cp -r *.py lib/ 2>/dev/null || true
-          cp requirements.txt package/
+          cp requirements.txt package/ 2>/dev/null || true
           cd package
-          zip -r ../function.zip .
+          zip -r ../function.zip . > /dev/null
           cd ..
+          echo "Package size: $(du -h function.zip | cut -f1)"
       
-      - name: Upload to Object Storage (optional)
+      - name: Get IAM token and deploy function
+        env:
+          SA_KEY_JSON: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          FUNCTION_ID: ${{ secrets.YC_FUNCTION_ID }}
         run: |
-          export PATH="$HOME/.yandex-cloud/bin:$PATH"
-          if [ -n "${{ secrets.YC_BUCKET_NAME }}" ]; then
-            yc storage cp function.zip s3://${{ secrets.YC_BUCKET_NAME }}/function.zip
-          fi
-      
-      - name: Update function
-        run: |
-          export PATH="$HOME/.yandex-cloud/bin:$PATH"
-          yc serverless function version create \
-            --function-id $YC_FUNCTION_ID \
-            --runtime python311 \
-            --entrypoint index.handler \
-            --memory 128m \
-            --execution-timeout 3s \
-            --source-path function.zip \
-            --environment PYTHONUNBUFFERED=1
+          python3 << 'EOF'
+          import json
+          import requests
+          import time
+          import jwt
+          from datetime import datetime, timedelta
+          import os
+          
+          # Get service account key from environment
+          sa_key = json.loads(os.environ['SA_KEY_JSON'])
+          function_id = os.environ['FUNCTION_ID']
+          
+          # Create JWT for IAM token request
+          now = datetime.utcnow()
+          payload = {
+              'aud': 'https://iam.api.cloud.yandex.net/iam/v1/tokens',
+              'iss': sa_key['service_account_id'],
+              'iat': int(time.mktime(now.timetuple())),
+              'exp': int(time.mktime((now + timedelta(hours=1)).timetuple()))
+          }
+          
+          # Sign JWT
+          encoded_token = jwt.encode(
+              payload,
+              sa_key['private_key'],
+              algorithm='PS256',
+              headers={'kid': sa_key['id']}
+          )
+          
+          # Get IAM token
+          iam_response = requests.post(
+              'https://iam.api.cloud.yandex.net/iam/v1/tokens',
+              json={'jwt': encoded_token}
+          )
+          iam_response.raise_for_status()
+          iam_token = iam_response.json()['iamToken']
+          
+          print("✓ IAM token obtained")
+          
+          # Read function.zip
+          with open('function.zip', 'rb') as f:
+              zip_content = f.read()
+          
+          # Create function version
+          create_response = requests.post(
+              f'https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/{function_id}/versions',
+              headers={
+                  'Authorization': f'Bearer {iam_token}',
+                  'Content-Type': 'application/zip'
+              },
+              data=zip_content,
+              params={
+                  'runtime': 'python311',
+                  'entrypoint': 'index.handler',
+                  'resources.memory': '134217728',
+                  'executionTimeout': '3s',
+                  'environment': 'PYTHONUNBUFFERED=1'
+              }
+          )
+          
+          if create_response.status_code == 200:
+              version = create_response.json()
+              print(f"✓ Function version created: {version.get('id', 'unknown')}")
+          else:
+              print(f"✗ Error: {create_response.status_code}")
+              print(create_response.text)
+              exit(1)
+          EOF
