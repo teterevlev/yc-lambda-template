@@ -31,8 +31,8 @@ jobs:
       - name: Deploy to Yandex Cloud Functions
         uses: goodsmileduck/yandex-serverless-action@v2
         with:
-          token: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
-          function_id: ${{ secrets.YC_FUNCTION_ID }}
+          yc-sa-json-credentials: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          function-id: ${{ secrets.YC_FUNCTION_ID }}
           runtime: 'python311'
           memory: '128'
           entrypoint: 'index.handler'
