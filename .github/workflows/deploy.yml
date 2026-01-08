@@ -92,10 +92,18 @@ jobs:
               
               iam_token = iam_data['iamToken']
               
-              with open(os.environ.get('GITHUB_ENV', '/dev/stdout'), 'a') as f:
-                  f.write(f"IAM_TOKEN={iam_token}\n")
-              
-              print("✓ IAM token obtained")
+              github_env = os.environ.get('GITHUB_ENV')
+              if github_env:
+                  with open(github_env, 'a') as f:
+                      f.write(f"IAM_TOKEN={iam_token}\n")
+                  print("✓ IAM token obtained and saved to GITHUB_ENV")
+              else:
+                  print("Warning: GITHUB_ENV not found, trying output")
+                  print(f"::add-mask::{iam_token[:10]}...")
+                  
+              # Also save to output for debugging
+              print(f"Token length: {len(iam_token)}")
+              print("✓ IAM token obtained successfully")
               
           except json.JSONDecodeError as e:
               print(f"Error parsing service account key JSON: {e}", file=sys.stderr)
@@ -110,6 +118,14 @@ jobs:
               print(f"Unexpected error: {e}", file=sys.stderr)
               sys.exit(1)
           EOF
+      
+      - name: Verify IAM token
+        run: |
+          if [ -z "${{ env.IAM_TOKEN }}" ]; then
+            echo "Error: IAM_TOKEN is empty after generation"
+            exit 1
+          fi
+          echo "✓ IAM token is set (length: ${#IAM_TOKEN})"
       
       - name: Prepare deployment directory
         run: |
@@ -147,8 +163,7 @@ jobs:
           find package -type f
       
       - name: Deploy to Yandex Cloud Functions
-        env:
-          IAM_TOKEN: ${{ env.IAM_TOKEN }}
+        id: deploy
         uses: goodsmileduck/yandex-serverless-action@v2
         with:
           token: ${{ env.IAM_TOKEN }}
