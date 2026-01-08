@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   YC_FUNCTION_ID: ${{ secrets.YC_FUNCTION_ID }}
@@ -27,9 +28,16 @@ jobs:
         run: |
           curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
           echo "$HOME/.yandex-cloud/bin" >> $GITHUB_PATH
+          echo "$HOME/.yandex-cloud/bin" >> $PATH
+      
+      - name: Verify YC CLI installation
+        run: |
+          export PATH="$HOME/.yandex-cloud/bin:$PATH"
+          yc --version
       
       - name: Configure YC CLI
         run: |
+          export PATH="$HOME/.yandex-cloud/bin:$PATH"
           mkdir -p ~/.config/yandex-cloud
           echo "$YC_SERVICE_ACCOUNT_KEY" > ~/.config/yandex-cloud/key.json
           yc config set service-account-key ~/.config/yandex-cloud/key.json
@@ -45,12 +53,14 @@ jobs:
       
       - name: Upload to Object Storage (optional)
         run: |
+          export PATH="$HOME/.yandex-cloud/bin:$PATH"
           if [ -n "${{ secrets.YC_BUCKET_NAME }}" ]; then
             yc storage cp function.zip s3://${{ secrets.YC_BUCKET_NAME }}/function.zip
           fi
       
       - name: Update function
         run: |
+          export PATH="$HOME/.yandex-cloud/bin:$PATH"
           yc serverless function version create \
             --function-id $YC_FUNCTION_ID \
             --runtime python311 \
